@@ -1,0 +1,6 @@
+{
+  "name": "目录系统",
+  "description": "企业及政务信息资源目录梳理、系统登记、资源采集、目录补全与编制管理系统",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
