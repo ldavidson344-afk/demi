@@ -18,7 +18,9 @@ import {
   Edit3,
   Layers,
   Check,
-  RefreshCw
+  RefreshCw,
+  Users,
+  ChevronDown
 } from 'lucide-react';
 
 export interface MountedDatabase {
@@ -43,7 +45,9 @@ export interface BusinessSystem {
   id: string;
   name: string;             // 系统名称
   systemCategory?: string;  // 系统所属分类 (数据字典: 无、自建自用、国直、省直、市直、县直)
-  department: string;       // 系统所属部门
+  department: string;       // 系统所属部门 (主责部门概览)
+  mainDepartment: string;   // 主责部门
+  businessDepartments: string[]; // 业务部门 / 共用部门 (一个系统多个部门共用)
   serverLocation: string;   // 机房部署位置
   businessOwner: string;    // 业务负责人
   businessContact: string;  // 业务负责人联系方式
@@ -60,7 +64,9 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     id: 'SYS-001',
     name: '综合政务审批系统',
     systemCategory: '市直',
-    department: '科信司',
+    department: '市行政审批局',
+    mainDepartment: '市行政审批局',
+    businessDepartments: ['科信司', '市场监管局', '自然资源局', '税务局', '住建局'],
     serverLocation: '市行政中心 B栋地下2层 1号政务机房',
     businessOwner: '张伟明 (主任)',
     businessContact: '13800138001',
@@ -68,7 +74,7 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     vendorContact: '13911112222',
     registeredAt: '2026-03-12',
     networkType: '政务外网',
-    remark: '支撑企业开办、许可审批核心业务，包含 42 张元数据数据表。',
+    remark: '支撑企业开办、许可审批核心业务，包含 42 张元数据数据表。多个部门跨界联合审批共用。',
     mountedDatabases: [
       {
         id: 'MDB-001',
@@ -91,7 +97,9 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     id: 'SYS-002',
     name: '电子税务服务平台',
     systemCategory: '省直',
-    department: '科信司',
+    department: '市税务局',
+    mainDepartment: '市税务局',
+    businessDepartments: ['科信司', '财政局', '审计局', '市场监管局'],
     serverLocation: '税务大厦 4楼核心机房 A03机柜',
     businessOwner: '王丽华 (处长)',
     businessContact: '13800138002',
@@ -122,7 +130,9 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     id: 'SYS-003',
     name: '科技创新管理系统',
     systemCategory: '国直',
-    department: '科信司',
+    department: '市科技局',
+    mainDepartment: '市科技局',
+    businessDepartments: ['科信司', '发改委', '工信局'],
     serverLocation: '华北云数据中心 机房区 2号专区',
     businessOwner: '刘建国 (副局长)',
     businessContact: '13800138003',
@@ -137,7 +147,9 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     id: 'SYS-004',
     name: '智慧交通调度中心平台',
     systemCategory: '自建自用',
-    department: '科信司',
+    department: '市交通运输局',
+    mainDepartment: '市交通运输局',
+    businessDepartments: ['科信司', '公安交警支队', '应急管理局', '城管局'],
     serverLocation: '交通指挥中心 3楼主数据机房',
     businessOwner: '陈明 (科长)',
     businessContact: '13800138004',
@@ -168,7 +180,9 @@ const INITIAL_BUSINESS_SYSTEMS: BusinessSystem[] = [
     id: 'SYS-005',
     name: '不动产登记综合平台',
     systemCategory: '县直',
-    department: '科信司',
+    department: '市自然资源局',
+    mainDepartment: '市自然资源局',
+    businessDepartments: ['科信司', '住建局', '税务局', '不动产登记中心'],
     serverLocation: '自然资源局大楼 2楼专用机房',
     businessOwner: '杨雪 (主管)',
     businessContact: '13800138005',
@@ -197,11 +211,22 @@ export const SystemRegistrationView: React.FC = () => {
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
+  // Preset options for quick selecting common departments
+  const PRESET_DEPARTMENTS = [
+    '科信司', '市行政审批局', '市市场监督管理局', '市自然资源局', '市税务局', 
+    '市交通运输局', '市财政局', '市公安局', '市住建局', '市发改委', '市应急管理局', '综合执法局',
+    '市卫生健康委员会', '市生态环境局', '市水务局', '市农业农村局'
+  ];
+
+  const [isBizDeptDropdownOpen, setIsBizDeptDropdownOpen] = useState(false);
+  const [bizDeptSearch, setBizDeptSearch] = useState('');
+
   // Form State for System Registration & Editing
   const [formData, setFormData] = useState({
     name: '',
     systemCategory: '自建自用',
-    department: '科信司',
+    mainDepartment: '市行政审批局',
+    businessDepartments: ['科信司', '市行政审批局', '市市场监督管理局'],
     serverLocation: '',
     businessOwner: '',
     businessContact: '',
@@ -211,6 +236,7 @@ export const SystemRegistrationView: React.FC = () => {
     remark: ''
   });
 
+  const [customBizDeptInput, setCustomBizDeptInput] = useState('');
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Form State for Mount Database
@@ -233,13 +259,45 @@ export const SystemRegistrationView: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
+  // Toggle business department selection
+  const handleToggleBizDept = (deptName: string) => {
+    setFormData(prev => {
+      const exists = prev.businessDepartments.includes(deptName);
+      if (exists) {
+        return {
+          ...prev,
+          businessDepartments: prev.businessDepartments.filter(d => d !== deptName)
+        };
+      } else {
+        return {
+          ...prev,
+          businessDepartments: [...prev.businessDepartments, deptName]
+        };
+      }
+    });
+  };
+
+  // Add custom business department
+  const handleAddCustomBizDept = () => {
+    const trimmed = customBizDeptInput.trim();
+    if (!trimmed) return;
+    if (!formData.businessDepartments.includes(trimmed)) {
+      setFormData(prev => ({
+        ...prev,
+        businessDepartments: [...prev.businessDepartments, trimmed]
+      }));
+    }
+    setCustomBizDeptInput('');
+  };
+
   // Open modal to Register New System
   const handleOpenRegisterModal = () => {
     setEditingSystem(null);
     setFormData({
       name: '',
       systemCategory: '自建自用',
-      department: '科信司',
+      mainDepartment: '科信司',
+      businessDepartments: [],
       serverLocation: '',
       businessOwner: '',
       businessContact: '',
@@ -248,6 +306,9 @@ export const SystemRegistrationView: React.FC = () => {
       networkType: '政务外网',
       remark: ''
     });
+    setCustomBizDeptInput('');
+    setIsBizDeptDropdownOpen(false);
+    setBizDeptSearch('');
     setFormErrors({});
     setIsRegisterModalOpen(true);
   };
@@ -258,7 +319,8 @@ export const SystemRegistrationView: React.FC = () => {
     setFormData({
       name: sys.name,
       systemCategory: sys.systemCategory || '自建自用',
-      department: sys.department || '科信司',
+      mainDepartment: sys.mainDepartment || sys.department || '科信司',
+      businessDepartments: sys.businessDepartments || [],
       serverLocation: sys.serverLocation,
       businessOwner: sys.businessOwner,
       businessContact: sys.businessContact,
@@ -267,6 +329,9 @@ export const SystemRegistrationView: React.FC = () => {
       networkType: sys.networkType || '政务外网',
       remark: sys.remark || ''
     });
+    setCustomBizDeptInput('');
+    setIsBizDeptDropdownOpen(false);
+    setBizDeptSearch('');
     setFormErrors({});
     setIsRegisterModalOpen(true);
   };
@@ -275,7 +340,8 @@ export const SystemRegistrationView: React.FC = () => {
   const validateForm = () => {
     const errors: Record<string, string> = {};
     if (!formData.name.trim()) errors.name = '请输入系统名称';
-    if (!formData.department.trim()) errors.department = '请选择或输入系统所属部门';
+    if (!formData.mainDepartment.trim()) errors.mainDepartment = '请输入或选择系统主责部门';
+    // 业务部门 (共用部门) 已设为非必填
     if (!formData.serverLocation.trim()) errors.serverLocation = '请输入机房部署位置';
     if (!formData.businessOwner.trim()) errors.businessOwner = '请输入业务负责人姓名';
     if (!formData.businessContact.trim()) errors.businessContact = '请输入业务负责人联系方式';
@@ -299,7 +365,9 @@ export const SystemRegistrationView: React.FC = () => {
             ...s,
             name: formData.name,
             systemCategory: formData.systemCategory,
-            department: formData.department,
+            department: formData.mainDepartment,
+            mainDepartment: formData.mainDepartment,
+            businessDepartments: formData.businessDepartments,
             serverLocation: formData.serverLocation,
             businessOwner: formData.businessOwner,
             businessContact: formData.businessContact,
@@ -319,7 +387,9 @@ export const SystemRegistrationView: React.FC = () => {
         id: `SYS-00${systems.length + 1}`,
         name: formData.name,
         systemCategory: formData.systemCategory,
-        department: formData.department,
+        department: formData.mainDepartment,
+        mainDepartment: formData.mainDepartment,
+        businessDepartments: formData.businessDepartments,
         serverLocation: formData.serverLocation,
         businessOwner: formData.businessOwner,
         businessContact: formData.businessContact,
@@ -451,7 +521,8 @@ export const SystemRegistrationView: React.FC = () => {
     const matchesSearch = !q || (
       sys.name.toLowerCase().includes(q) ||
       (sys.systemCategory || '').toLowerCase().includes(q) ||
-      sys.department.toLowerCase().includes(q) ||
+      (sys.mainDepartment || sys.department || '').toLowerCase().includes(q) ||
+      (sys.businessDepartments || []).some(d => d.toLowerCase().includes(q)) ||
       sys.serverLocation.toLowerCase().includes(q) ||
       sys.businessOwner.toLowerCase().includes(q) ||
       sys.vendorOwner.toLowerCase().includes(q)
@@ -485,7 +556,7 @@ export const SystemRegistrationView: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              登录用户可登记本部门的业务系统信息，系统基本信息包括系统名称、系统所属分类、系统所属部门、机房部署位置、业务负责人及联系方式、厂商负责人及联系方式
+              登录用户可登记业务系统信息，支持明确【主责部门】与【业务部门 (共用部门)】，便于多部门跨机构共用与统筹规划
             </p>
           </div>
         </div>
@@ -553,7 +624,7 @@ export const SystemRegistrationView: React.FC = () => {
             <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
             <input 
               type="text"
-              placeholder="关键字全局搜索 (系统/分类/部门/机房)..."
+              placeholder="关键字全局搜索 (系统/主责部门/业务部门/机房)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-200/90 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 transition-all placeholder:text-slate-400 shadow-2xs"
@@ -566,6 +637,8 @@ export const SystemRegistrationView: React.FC = () => {
           {filteredSystems.length > 0 ? (
             filteredSystems.map((sys) => {
               const mountedCount = sys.mountedDatabases?.length || 0;
+              const mainDept = sys.mainDepartment || sys.department || '未划分';
+              const bizDepts = sys.businessDepartments || [];
 
               return (
                 <div 
@@ -617,14 +690,22 @@ export const SystemRegistrationView: React.FC = () => {
                           </span>
                         </div>
 
-                        {/* 部门 & 机房 */}
+                        {/* 部门 (区分主责部门与业务部门) & 机房 */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[11px] font-medium text-slate-400">所属部门 / 部署位置:</span>
-                          <span className="font-semibold text-slate-800 flex items-center gap-1">
-                            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            {sys.department}
-                          </span>
-                          <span className="text-[11px] text-slate-500 flex items-center gap-1 truncate" title={sys.serverLocation}>
+                          <span className="text-[11px] font-medium text-slate-400">系统权属部门 (主责/业务部门):</span>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-[11px]" title="主责部门">
+                              <Building2 className="w-3 h-3 text-indigo-600 shrink-0" />
+                              主责: {mainDept}
+                            </span>
+                            {bizDepts.length > 0 && (
+                              <span className="text-[10px] text-slate-600 font-medium bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded flex items-center gap-1" title={`共用业务部门 (${bizDepts.length}个): ${bizDepts.join('、')}`}>
+                                <Users className="w-3 h-3 text-slate-500 shrink-0" />
+                                业务: {bizDepts.slice(0, 2).join('、')}{bizDepts.length > 2 ? '…' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-slate-500 flex items-center gap-1 truncate mt-0.5" title={sys.serverLocation}>
                             <Server className="w-3 h-3 text-slate-400 shrink-0" />
                             {sys.serverLocation}
                           </span>
@@ -732,7 +813,7 @@ export const SystemRegistrationView: React.FC = () => {
                   <h3 className="text-sm font-bold text-slate-900">
                     {editingSystem ? `修改业务系统信息【${editingSystem.name}】` : '登记本部门业务系统'}
                   </h3>
-                  <p className="text-[11px] text-slate-500">请准确填写本业务系统的基本信息与归口责任人</p>
+                  <p className="text-[11px] text-slate-500">请准确填写本业务系统的基本信息、主责部门及共用业务部门</p>
                 </div>
               </div>
               <button 
@@ -779,21 +860,174 @@ export const SystemRegistrationView: React.FC = () => {
                 <p className="text-[10px] text-slate-400 mt-1">分类字典选项：无、自建自用、国直、省直、市直、县直</p>
               </div>
 
-              {/* Field 3: 系统所属部门 */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  3. 系统所属部门 <span className="text-rose-500">*</span>
-                </label>
-                <input 
-                  type="text"
-                  placeholder="统一为：科信司"
-                  value={formData.department}
-                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                  className={`w-full px-3 py-2 rounded-lg border text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
-                    formErrors.department ? 'border-rose-300 bg-rose-50/30' : 'border-slate-200 bg-slate-50/50'
-                  }`}
-                />
-                {formErrors.department && <p className="text-[11px] text-rose-500 mt-0.5">{formErrors.department}</p>}
+              {/* Field 3: 系统所属部门设置 (区分主责部门与业务部门) */}
+              <div className="p-3.5 bg-indigo-50/40 rounded-xl border border-indigo-100/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold text-slate-900">3. 系统所属部门设置 (区分主责部门与业务部门)</h4>
+                  </div>
+                  <span className="text-[10px] text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded font-medium">支持多部门共用</span>
+                </div>
+
+                {/* 主责部门 */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-800 mb-1">
+                    主责部门 (建设/运维主管单位) <span className="text-rose-500">*</span>
+                  </label>
+                  <input 
+                    type="text"
+                    placeholder="例如：市行政审批局 / 科信司"
+                    value={formData.mainDepartment}
+                    onChange={(e) => setFormData({ ...formData, mainDepartment: e.target.value })}
+                    className={`w-full px-3 py-2 rounded-lg border text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white ${
+                      formErrors.mainDepartment ? 'border-rose-300 bg-rose-50/30' : 'border-slate-200'
+                    }`}
+                  />
+                  {formErrors.mainDepartment && <p className="text-[11px] text-rose-500 mt-0.5">{formErrors.mainDepartment}</p>}
+                </div>
+
+                {/* 业务部门 (共用部门 - 下拉多选 - 非必填) */}
+                <div className="relative">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-800">
+                      业务部门 / 共用部门 <span className="text-slate-400 font-normal text-[11px]">(下拉多选，非必填)</span>
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium">已选 {formData.businessDepartments.length} 个部门</span>
+                  </div>
+
+                  {/* Dropdown Selector Trigger */}
+                  <div 
+                    onClick={() => setIsBizDeptDropdownOpen(!isBizDeptDropdownOpen)}
+                    className="w-full min-h-[42px] px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all cursor-pointer flex items-center justify-between gap-2 shadow-2xs"
+                  >
+                    <div className="flex flex-wrap gap-1.5 items-center flex-1">
+                      {formData.businessDepartments.length > 0 ? (
+                        formData.businessDepartments.map((dept, idx) => (
+                          <span 
+                            key={idx} 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-medium"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleBizDept(dept);
+                            }}
+                          >
+                            <span>{dept}</span>
+                            <X className="w-3 h-3 text-indigo-400 hover:text-rose-600 transition-colors" />
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-400 text-xs">点击下拉选择业务部门 (非必填，可多选)...</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {formData.businessDepartments.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFormData(prev => ({ ...prev, businessDepartments: [] }));
+                          }}
+                          className="text-[10px] text-slate-400 hover:text-rose-600 underline px-1"
+                        >
+                          清空
+                        </button>
+                      )}
+                      <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${isBizDeptDropdownOpen ? 'rotate-180 text-indigo-600' : ''}`} />
+                    </div>
+                  </div>
+
+                  {/* Dropdown Menu Panel */}
+                  {isBizDeptDropdownOpen && (
+                    <div className="absolute z-30 left-0 right-0 mt-1 bg-white rounded-xl border border-slate-200/90 shadow-xl p-3 space-y-2.5">
+                      {/* Search Filter Input */}
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input 
+                          type="text"
+                          placeholder="搜索筛选共用部门..."
+                          value={bizDeptSearch}
+                          onChange={(e) => setBizDeptSearch(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-full pl-8 pr-3 py-1.5 rounded-md border border-slate-200 bg-slate-50/50 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:bg-white transition-all placeholder:text-slate-400"
+                        />
+                      </div>
+
+                      {/* Checkboxes List of Preset Departments */}
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto pr-1 text-xs">
+                        <div className="text-[10px] font-semibold text-slate-400 px-1 py-1">常用共用部门列表 (多选)：</div>
+                        {PRESET_DEPARTMENTS
+                          .filter(dept => !bizDeptSearch || dept.toLowerCase().includes(bizDeptSearch.toLowerCase()))
+                          .map((dept) => {
+                            const isSelected = formData.businessDepartments.includes(dept);
+                            return (
+                              <div
+                                key={dept}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleBizDept(dept);
+                                }}
+                                className={`flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                  isSelected 
+                                    ? 'bg-indigo-50/90 text-indigo-900 font-semibold' 
+                                    : 'hover:bg-slate-100/70 text-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <input 
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}} // Controlled via row click
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                                  />
+                                  <span>{dept}</span>
+                                </div>
+                                {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />}
+                              </div>
+                            );
+                          })}
+                        {PRESET_DEPARTMENTS.filter(dept => !bizDeptSearch || dept.toLowerCase().includes(bizDeptSearch.toLowerCase())).length === 0 && (
+                          <div className="text-center py-3 text-xs text-slate-400">未找到相关部门</div>
+                        )}
+                      </div>
+
+                      {/* Add Custom Department Entry */}
+                      <div className="pt-2 border-t border-slate-100 flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="text"
+                          placeholder="或添加其他自定义部门..."
+                          value={customBizDeptInput}
+                          onChange={(e) => setCustomBizDeptInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddCustomBizDept();
+                            }
+                          }}
+                          className="flex-1 px-2.5 py-1.5 rounded-md border border-slate-200 text-xs bg-white text-slate-800 focus:outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomBizDept}
+                          className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors shrink-0"
+                        >
+                          添加
+                        </button>
+                      </div>
+
+                      {/* Complete / Close Selection */}
+                      <div className="flex justify-end pt-1 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setIsBizDeptDropdownOpen(false)}
+                          className="px-3 py-1 rounded-md bg-slate-800 hover:bg-slate-900 text-white text-xs font-medium transition-colors"
+                        >
+                          完成选择
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Field 4: 机房部署位置 */}
@@ -1227,8 +1461,47 @@ export const SystemRegistrationView: React.FC = () => {
                   </div>
                 </div>
                 <div>
-                  <span className="text-[11px] text-slate-400">系统所属部门</span>
-                  <div className="font-bold text-slate-900 text-xs mt-0.5">{viewDetailSystem.department}</div>
+                  <span className="text-[11px] text-slate-400">部署网络环境</span>
+                  <div className="font-bold text-indigo-700 text-xs mt-0.5">
+                    {viewDetailSystem.networkType || '政务外网'}
+                  </div>
+                </div>
+              </div>
+
+              {/* 部门权属划分 */}
+              <div className="p-3.5 rounded-xl bg-indigo-50/40 border border-indigo-100 space-y-2">
+                <div className="flex items-center justify-between border-b border-indigo-100 pb-1.5">
+                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                    系统归口与部门划分
+                  </span>
+                  <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded">
+                    支持多部门共用
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-500 block mb-1">主责部门 (主管单位)</span>
+                    <span className="font-bold text-indigo-800 text-xs bg-white px-2 py-1 rounded border border-indigo-200 inline-block shadow-2xs">
+                      {viewDetailSystem.mainDepartment || viewDetailSystem.department || '未划分'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-500 block mb-1">
+                      共用业务部门 ({viewDetailSystem.businessDepartments?.length || 0} 个)
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {viewDetailSystem.businessDepartments && viewDetailSystem.businessDepartments.length > 0 ? (
+                        viewDetailSystem.businessDepartments.map((dept, i) => (
+                          <span key={i} className="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-800 text-[11px] font-medium shadow-2xs">
+                            {dept}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-slate-400 text-[11px]">暂无登记业务部门</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
